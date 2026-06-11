@@ -5,6 +5,8 @@ import sys
 from array import array
 import numpy as np
 import pyvirtualcam
+import hand_detection as hd
+
 
 def redefine():
     video = cv2.VideoCapture(0)
@@ -13,6 +15,11 @@ def redefine():
 def get_frame(video):
     ret, frame = video.read()
     if ret:
+        yaw,fist = hd.get_image(frame)
+        try:
+            if yaw <0 : yaw = int(yaw*-1)
+            else: yaw = int(yaw)
+        except: pass
         frame = cv_to_py(frame)
         frame, wh = resolution(frame)
     else:
@@ -20,7 +27,7 @@ def get_frame(video):
         video.release()
         cv2.destroyAllWindows()
         sys.exit()
-    return frame, wh, video
+    return frame, wh, video,yaw,fist
 
 def cv_to_py(frame):
     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -52,7 +59,7 @@ fps = video.get(cv2.CAP_PROP_FPS)
 if fps <= 0 or fps > 120:
     fps = 30  # fallback
 
-img, wh, video = get_frame(video)
+img, wh, video,yaw,fist = get_frame(video)
 img.set_colorkey((255, 255, 255))
 img, wh = resolution(img)
 
@@ -109,14 +116,46 @@ def output(ctx):
             cam.send(frame)
             cam.sleep_until_next_frame()
 
+def tick(time):
+    global timer
+    time += 1
+    if time == 500:
+        time = 0
+        timer = False
+    print(time)
+    return time
+
+def swap_render(typ):
+    if typ == "norm":return "ascii"
+    elif typ == "ascii": return "norm"
 
 with pyvirtualcam.Camera(width=screen_width, height=screen_height, fps=int(fps)) as cam:
-    print(f"Virtual camera started: {screen_width}x{screen_height} @ {int(fps)}fps")
 
     rend = "norm"
-
+    wait_time = 0
+    timer = False
     while True:
-        img, wh, video = get_frame(video)
+
+        img, wh, video,yaw,fist = get_frame(video)
+        if fist == True and timer == False:
+            rend = swap_render(rend)
+            timer = True
+            print("swap")
+        try:
+            if timer == False and yaw <90:
+                cell_width += 2
+                cell_height += 2
+                timer = True
+            elif timer == False and yaw > 90:
+                cell_width -= 2
+                cell_height -= 2
+                timer = True
+        except: pass
+        if timer == True:
+            wait_time += 1
+            if wait_time >10:
+                timer = False
+                wait_time = 0
 
         display.fill((0, 0, 0))
         display.blit(img, (0, 0))
@@ -127,17 +166,6 @@ with pyvirtualcam.Camera(width=screen_width, height=screen_height, fps=int(fps))
                 video.release()
                 cv2.destroyAllWindows()
                 sys.exit()
-            if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_d:
-                    rend = "ascii"
-                if event.key == pygame.K_a:
-                    rend = "norm"
-                if event.key == pygame.K_w:
-                    cell_width += 2
-                    cell_height += 2
-                if event.key == pygame.K_s:
-                    cell_width = max(2, cell_width - 2)
-                    cell_height = max(2, cell_height - 2)
 
         if rend == "ascii":
             v = open("vertex_shader.glsl")
